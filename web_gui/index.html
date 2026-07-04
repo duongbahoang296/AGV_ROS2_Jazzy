@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AGV Control · Điều khiển nhiệm vụ nâng hạ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.14.1/mqtt.min.js"></script>
+<style>
+  :root{
+    --bg:#12161b;
+    --panel:#1a2029;
+    --panel-2:#1f2630;
+    --border:#2a323d;
+    --text:#e7ebef;
+    --muted:#8891a0;
+    --amber:#ff8a2b;
+    --amber-dim:#ff8a2b33;
+    --cyan:#2bd1c4;
+    --cyan-dim:#2bd1c433;
+    --red:#ff5470;
+    --green:#3ddc84;
+    --font-mono:'IBM Plex Mono', monospace;
+    --font-sans:'IBM Plex Sans', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, #1c2531 0%, transparent 60%),
+      radial-gradient(1000px 500px at 110% 10%, #1a2a2a 0%, transparent 55%),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--font-sans);
+    min-height:100vh;
+  }
+  .wrap{
+    max-width:1180px;
+    margin:0 auto;
+    padding:28px 20px 60px;
+  }
+  header{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:20px;
+    margin-bottom:18px;
+    flex-wrap:wrap;
+    border-bottom:1px solid var(--border);
+    padding-bottom:18px;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:14px;
+  }
+  .brand-mark{
+    width:44px;height:44px;
+    border-radius:10px;
+    background:linear-gradient(135deg, var(--amber), #ff5470);
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--font-mono);
+    font-weight:700;
+    color:#12161b;
+    font-size:18px;
+    flex-shrink:0;
+  }
+  h1{
+    font-size:19px;
+    margin:0;
+    letter-spacing:.2px;
+  }
+  h1 span{color:var(--muted);font-weight:400;font-size:13px;display:block;margin-top:2px;font-family:var(--font-mono);}
+  .conn-badge{
+    display:flex;align-items:center;gap:8px;
+    font-family:var(--font-mono);
+    font-size:12.5px;
+    padding:7px 12px;
+    border-radius:20px;
+    border:1px solid var(--border);
+    background:var(--panel);
+    color:var(--muted);
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;}
+  .dot.connecting{background:var(--amber);animation:pulse 1s infinite;}
+  .dot.online{background:var(--green);box-shadow:0 0 8px var(--green);}
+  .dot.error{background:var(--red);}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+
+  /* --- role tabs --- */
+  .tabs{
+    display:flex;
+    gap:8px;
+    margin-bottom:20px;
+  }
+  .tab-btn{
+    font-family:var(--font-mono);
+    font-size:13px;
+    letter-spacing:.3px;
+    background:var(--panel);
+    border:1px solid var(--border);
+    color:var(--muted);
+    padding:9px 16px;
+    border-radius:9px;
+    cursor:pointer;
+  }
+  .tab-btn.active{
+    border-color:var(--amber);
+    color:var(--amber);
+    background:var(--amber-dim);
+  }
+  .view{display:none;}
+  .view.active{display:block;}
+
+  .grid{
+    display:grid;
+    grid-template-columns:1.35fr 1fr;
+    gap:20px;
+  }
+  @media (max-width:880px){ .grid{grid-template-columns:1fr;} }
+
+  .card{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:18px 18px 20px;
+  }
+  .card + .card{margin-top:20px;}
+  .card-title{
+    font-family:var(--font-mono);
+    font-size:11.5px;
+    letter-spacing:1.2px;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:0 0 14px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+  .card-title .hint{
+    text-transform:none;
+    letter-spacing:0;
+    font-size:12px;
+    color:var(--muted);
+  }
+  .card-note{
+    font-size:12px;
+    color:var(--muted);
+    margin:-8px 0 14px;
+    line-height:1.5;
+  }
+
+  /* --- floor map --- */
+  #floorSvg{width:100%;height:auto;display:block;}
+  .marker circle{
+    fill:var(--panel-2);
+    stroke:var(--border);
+    stroke-width:2;
+    transition:all .15s ease;
+    cursor:pointer;
+  }
+  .marker text{
+    fill:var(--text);
+    font-family:var(--font-mono);
+    font-weight:600;
+    text-anchor:middle;
+    dominant-baseline:central;
+    font-size:15px;
+    pointer-events:none;
+  }
+  .marker .role{
+    font-size:8.5px;
+    fill:var(--bg);
+    font-family:var(--font-mono);
+    font-weight:700;
+    text-anchor:middle;
+    pointer-events:none;
+  }
+  .marker:hover circle{stroke:var(--muted);}
+  .marker.is-pick circle{fill:var(--amber);stroke:var(--amber);}
+  .marker.is-pick text{fill:#12161b;}
+  .marker.is-drop circle{fill:var(--cyan);stroke:var(--cyan);}
+  .marker.is-drop text{fill:#12161b;}
+  .marker.flash circle{animation:flashok .5s ease;}
+  @keyframes flashok{0%{fill:var(--green);stroke:var(--green);}100%{}}
+  .route-line{
+    stroke:var(--amber);
+    stroke-width:2.5;
+    stroke-dasharray:6 5;
+    fill:none;
+    opacity:0;
+    animation:march 1s linear infinite;
+  }
+  .route-line.show{opacity:.85;}
+  @keyframes march{to{stroke-dashoffset:-22;}}
+
+  .selection-status{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    margin-top:14px;
+    font-family:var(--font-mono);
+    font-size:12.5px;
+    color:var(--muted);
+    flex-wrap:wrap;
+  }
+  .chip{
+    padding:4px 10px;
+    border-radius:6px;
+    border:1px solid var(--border);
+    background:var(--panel-2);
+  }
+  .chip.pick{border-color:var(--amber);color:var(--amber);}
+  .chip.drop{border-color:var(--cyan);color:var(--cyan);}
+  .cancel-btn{
+    margin-left:auto;
+    background:none;
+    border:1px solid var(--border);
+    color:var(--muted);
+    border-radius:6px;
+    padding:4px 10px;
+    font-family:var(--font-mono);
+    font-size:12px;
+    cursor:pointer;
+  }
+  .cancel-btn:hover{border-color:var(--red);color:var(--red);}
+
+  /* --- forms --- */
+  label{
+    display:block;
+    font-size:12px;
+    color:var(--muted);
+    margin:10px 0 5px;
+    font-family:var(--font-mono);
+  }
+  input[type=text],input[type=password],input[type=number]{
+    width:100%;
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:9px 11px;
+    color:var(--text);
+    font-family:var(--font-mono);
+    font-size:13px;
+  }
+  input:focus{outline:none;border-color:var(--amber);}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .checkline{
+    display:flex;align-items:center;gap:8px;
+    margin-top:12px;
+    font-family:var(--font-mono);
+    font-size:12px;
+    color:var(--muted);
+  }
+  .checkline input{width:auto;}
+
+  button.primary{
+    width:100%;
+    margin-top:16px;
+    background:var(--amber);
+    color:#1a1200;
+    border:none;
+    border-radius:9px;
+    padding:11px;
+    font-weight:700;
+    font-size:13.5px;
+    cursor:pointer;
+    font-family:var(--font-sans);
+    letter-spacing:.2px;
+  }
+  button.primary:disabled{background:var(--panel-2);color:var(--muted);cursor:not-allowed;}
+  button.secondary{
+    width:100%;
+    margin-top:10px;
+    background:none;
+    border:1px solid var(--border);
+    color:var(--text);
+    border-radius:9px;
+    padding:10px;
+    cursor:pointer;
+    font-family:var(--font-sans);
+    font-size:13px;
+  }
+  button.secondary:hover{border-color:var(--muted);}
+  button.danger:hover{border-color:var(--red);color:var(--red);}
+
+  /* --- queue --- */
+  .queue-item{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:9px;
+    padding:9px 11px;
+    margin-bottom:8px;
+    font-family:var(--font-mono);
+    font-size:12.5px;
+  }
+  .queue-item b{color:var(--amber);}
+  .queue-item .arrow{color:var(--muted);}
+  .queue-item .to{color:var(--cyan);}
+  .queue-item .rm{
+    margin-left:auto;
+    background:none;border:none;color:var(--muted);
+    cursor:pointer;font-size:15px;line-height:1;
+  }
+  .queue-item .rm:hover{color:var(--red);}
+  .queue-empty{
+    color:var(--muted);
+    font-size:12.5px;
+    font-family:var(--font-mono);
+    padding:14px 0;
+    text-align:center;
+    border:1px dashed var(--border);
+    border-radius:9px;
+  }
+
+  /* --- log --- */
+  #log{
+    background:#0d1116;
+    border:1px solid var(--border);
+    border-radius:9px;
+    padding:10px 12px;
+    height:220px;
+    overflow-y:auto;
+    font-family:var(--font-mono);
+    font-size:11.8px;
+    line-height:1.7;
+  }
+  #log div{white-space:pre-wrap;word-break:break-word;}
+  .tag-ok{color:var(--green);}
+  .tag-err{color:var(--red);}
+  .tag-mqtt{color:var(--cyan);}
+  .tag-task{color:var(--amber);}
+  .ts{color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <div class="brand-mark">AGV</div>
+      <h1>Điều khiển nhiệm vụ AGV<span>Chọn marker trên sơ đồ &middot; gửi qua MQTT (HiveMQ)</span></h1>
+    </div>
+    <div class="conn-badge">
+      <span class="dot" id="connDot"></span>
+      <span id="connLabel">Chưa kết nối MQTT</span>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab-btn active" id="tabUserBtn">🧑 Người dùng</button>
+    <button class="tab-btn" id="tabManagerBtn">⚙️ Quản lý</button>
+  </div>
+
+  <!-- ================= USER VIEW ================= -->
+  <div class="view active" id="viewUser">
+    <div class="grid">
+      <div>
+        <div class="card">
+          <div class="card-title">
+            Sơ đồ marker kho
+            <span class="hint" id="markerCountLabel">4×5 = 20 marker</span>
+          </div>
+          <svg id="floorSvg" viewBox="0 0 800 420" xmlns="http://www.w3.org/2000/svg"></svg>
+
+          <div class="selection-status">
+            <span id="stageHint">Bấm 1 marker để chọn điểm <b style="color:var(--amber)">NÂNG</b></span>
+            <span class="chip pick" id="pickChip" style="display:none;"></span>
+            <span class="chip drop" id="dropChip" style="display:none;"></span>
+            <button class="cancel-btn" id="cancelSelBtn" style="display:none;">Hủy chọn</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-title">
+            Hàng đợi nhiệm vụ
+            <span class="hint" id="queueCountLabel">0 nhiệm vụ</span>
+          </div>
+          <div id="queueList"></div>
+          <button class="primary" id="sendBtn" disabled>Gửi nhiệm vụ tới AGV</button>
+          <button class="secondary" id="demoBtn">Nạp ví dụ mẫu (3,11; 4,3; 8,2)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MANAGER VIEW ================= -->
+  <div class="view" id="viewManager">
+    <div class="grid">
+      <div>
+        <div class="card">
+          <div class="card-title">Kết nối MQTT (HiveMQ)</div>
+          <div class="card-note">Kết nối 1 lần — trình duyệt sẽ tự lưu và tự kết nối lại ở những lần mở sau, không cần nhập lại.</div>
+
+          <label>Broker URL (WebSocket, dùng wss://)</label>
+          <input type="text" id="brokerUrl" placeholder="wss://xxxxxxxx.s1.eu.hivemq.cloud:8884/mqtt">
+
+          <div class="row2">
+            <div>
+              <label>Username</label>
+              <input type="text" id="mqttUser" autocomplete="off">
+            </div>
+            <div>
+              <label>Password</label>
+              <input type="password" id="mqttPass" autocomplete="off">
+            </div>
+          </div>
+
+          <label>Topic gửi nhiệm vụ</label>
+          <input type="text" id="mqttTopic" value="agv/tasks/request">
+
+          <label>Client ID</label>
+          <input type="text" id="mqttClientId">
+
+          <label class="checkline"><input type="checkbox" id="rememberChk" checked> Ghi nhớ &amp; tự động kết nối lần sau</label>
+
+          <button class="primary" id="connectBtn">Kết nối</button>
+          <button class="secondary danger" id="disconnectBtn" style="display:none;">Ngắt kết nối</button>
+          <button class="secondary danger" id="forgetBtn">Xoá thông tin đã lưu</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-title">Cấu hình sơ đồ</div>
+          <div class="card-note">Đánh số theo cột (giống file markers): marker số = cột × số-hàng + hàng, cột 0 ở bên trái, hàng 0 ở dưới cùng.</div>
+          <div class="row2">
+            <div>
+              <label>Số hàng (grid_rows)</label>
+              <input type="number" id="gridRowsInput" min="1" max="12" value="4">
+            </div>
+            <div>
+              <label>Số cột (grid_cols)</label>
+              <input type="number" id="gridColsInput" min="1" max="12" value="5">
+            </div>
+          </div>
+          <label>Khoảng cách marker - grid_spacing (m, chỉ để tham khảo)</label>
+          <input type="number" id="gridSpacingInput" min="0.1" step="0.1" value="0.4">
+          <button class="secondary" id="applyGridBtn">Cập nhật sơ đồ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= SHARED: LOG (luôn hiển thị cho cả 2 vai trò) ================= -->
+  <div class="card" style="margin-top:20px;">
+    <div class="card-title">Nhật ký hoạt động</div>
+    <div id="log"></div>
+  </div>
+
+</div>
+
+<script>
+// ---------- STORAGE KEYS ----------
+const CONN_KEY = 'agv_gui_conn_v1';
+const GRID_KEY = 'agv_gui_grid_v1';
+
+// ---------- STATE ----------
+let gridRows = 4;
+let gridCols = 5;
+let pickMarker = null;
+let dropMarker = null;
+let queue = []; // [{pick, drop}]
+let client = null;
+let connected = false;
+
+// ---------- TABS ----------
+const tabUserBtn = document.getElementById('tabUserBtn');
+const tabManagerBtn = document.getElementById('tabManagerBtn');
+const viewUser = document.getElementById('viewUser');
+const viewManager = document.getElementById('viewManager');
+
+tabUserBtn.addEventListener('click', ()=>{
+  tabUserBtn.classList.add('active'); tabManagerBtn.classList.remove('active');
+  viewUser.classList.add('active'); viewManager.classList.remove('active');
+});
+tabManagerBtn.addEventListener('click', ()=>{
+  tabManagerBtn.classList.add('active'); tabUserBtn.classList.remove('active');
+  viewManager.classList.add('active'); viewUser.classList.remove('active');
+});
+
+// ---------- LOG ----------
+const logEl = document.getElementById('log');
+function log(tag, msg){
+  const t = new Date().toLocaleTimeString('vi-VN', {hour12:false});
+  const div = document.createElement('div');
+  div.innerHTML = `<span class="ts">[${t}]</span> <span class="tag-${tag}">${msg}</span>`;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ---------- GRID CONFIG (persist) ----------
+function loadGridConfig(){
+  try{
+    const raw = localStorage.getItem(GRID_KEY);
+    if(raw){
+      const cfg = JSON.parse(raw);
+      if(cfg.rows) gridRows = cfg.rows;
+      if(cfg.cols) gridCols = cfg.cols;
+      if(cfg.spacing) document.getElementById('gridSpacingInput').value = cfg.spacing;
+    }
+  }catch(e){ /* ignore */ }
+  document.getElementById('gridRowsInput').value = gridRows;
+  document.getElementById('gridColsInput').value = gridCols;
+}
+
+function saveGridConfig(){
+  const spacing = parseFloat(document.getElementById('gridSpacingInput').value) || 0.4;
+  localStorage.setItem(GRID_KEY, JSON.stringify({rows: gridRows, cols: gridCols, spacing}));
+}
+
+// ---------- FLOOR MAP ----------
+// Đánh số giống file markers: id = col*rows + row
+// row 0 = dưới cùng (gần home), row tăng dần lên trên.
+// col 0 = bên trái, col tăng dần sang phải.
+const svg = document.getElementById('floorSvg');
+
+function layoutPositions(rows, cols){
+  const marginX = 70, marginY = 60;
+  const w = 800 - marginX*2;
+  const h = 420 - marginY*2;
+  const pts = new Array(rows*cols);
+  for(let col=0; col<cols; col++){
+    for(let row=0; row<rows; row++){
+      const id = col*rows + row;
+      const x = cols>1 ? marginX + col*(w/(cols-1)) : 400;
+      const y = rows>1 ? marginY + (rows-1-row)*(h/(rows-1)) : 210;
+      pts[id] = {x,y};
+    }
+  }
+  return pts;
+}
+
+function renderFloor(){
+  svg.innerHTML = '';
+  const pts = layoutPositions(gridRows, gridCols);
+
+  const routeLine = document.createElementNS('http://www.w3.org/2000/svg','line');
+  routeLine.setAttribute('id','routeLine');
+  routeLine.setAttribute('class','route-line');
+  svg.appendChild(routeLine);
+
+  pts.forEach((p, id)=>{
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('class','marker');
+    g.setAttribute('data-id', id);
+    g.setAttribute('transform', `translate(${p.x},${p.y})`);
+    g.style.cursor='pointer';
+
+    const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circle.setAttribute('r','20');
+    g.appendChild(circle);
+
+    const text = document.createElementNS('http://www.w3.org/2000/svg','text');
+    text.textContent = id;
+    g.appendChild(text);
+
+    const role = document.createElementNS('http://www.w3.org/2000/svg','text');
+    role.setAttribute('class','role');
+    role.setAttribute('y','30');
+    g.appendChild(role);
+
+    g.addEventListener('click', ()=> onMarkerClick(id));
+    svg.appendChild(g);
+  });
+
+  updateMarkerVisuals();
+  document.getElementById('markerCountLabel').textContent = `${gridRows}×${gridCols} = ${gridRows*gridCols} marker`;
+}
+
+function markerGroup(id){
+  return svg.querySelector(`.marker[data-id="${id}"]`);
+}
+
+function updateMarkerVisuals(){
+  svg.querySelectorAll('.marker').forEach(g=>{
+    const id = Number(g.getAttribute('data-id'));
+    g.classList.remove('is-pick','is-drop');
+    const role = g.querySelector('.role');
+    role.textContent = '';
+    if(id === pickMarker){ g.classList.add('is-pick'); role.textContent='NÂNG'; }
+    if(id === dropMarker){ g.classList.add('is-drop'); role.textContent='HẠ'; }
+  });
+
+  const routeLine = document.getElementById('routeLine');
+  if(pickMarker !== null && dropMarker !== null){
+    const gp = markerGroup(pickMarker), gd = markerGroup(dropMarker);
+    const tp = gp.getAttribute('transform').match(/[-\d.]+/g).map(Number);
+    const td = gd.getAttribute('transform').match(/[-\d.]+/g).map(Number);
+    routeLine.setAttribute('x1', tp[0]); routeLine.setAttribute('y1', tp[1]);
+    routeLine.setAttribute('x2', td[0]); routeLine.setAttribute('y2', td[1]);
+    routeLine.classList.add('show');
+  } else {
+    routeLine.classList.remove('show');
+  }
+}
+
+function updateSelectionHint(){
+  const pickChip = document.getElementById('pickChip');
+  const dropChip = document.getElementById('dropChip');
+  const cancelBtn = document.getElementById('cancelSelBtn');
+  const hint = document.getElementById('stageHint');
+
+  pickChip.style.display = pickMarker !== null ? 'inline-block' : 'none';
+  pickChip.textContent = pickMarker !== null ? `NÂNG tại marker ${pickMarker}` : '';
+  dropChip.style.display = dropMarker !== null ? 'inline-block' : 'none';
+  dropChip.textContent = dropMarker !== null ? `HẠ tại marker ${dropMarker}` : '';
+  cancelBtn.style.display = pickMarker !== null ? 'inline-block' : 'none';
+
+  hint.innerHTML = pickMarker === null
+    ? 'Bấm 1 marker để chọn điểm <b style="color:var(--amber)">NÂNG</b>'
+    : 'Bấm 1 marker khác để chọn điểm <b style="color:var(--cyan)">HẠ</b>';
+}
+
+function onMarkerClick(id){
+  if(pickMarker === null){
+    pickMarker = id;
+  } else if(pickMarker === id){
+    pickMarker = null;
+  } else {
+    dropMarker = id;
+    queue.push({pick: pickMarker, drop: dropMarker});
+    log('task', `Đã thêm nhiệm vụ: Nâng tại <b>${pickMarker}</b> &rarr; Hạ tại <b>${dropMarker}</b>`);
+    const gp = markerGroup(pickMarker), gd = markerGroup(dropMarker);
+    [gp, gd].forEach(g=>{ g.classList.add('flash'); setTimeout(()=>g.classList.remove('flash'), 500); });
+    pickMarker = null;
+    dropMarker = null;
+    renderQueue();
+  }
+  updateMarkerVisuals();
+  updateSelectionHint();
+}
+
+document.getElementById('cancelSelBtn').addEventListener('click', ()=>{
+  pickMarker = null; dropMarker = null;
+  updateMarkerVisuals(); updateSelectionHint();
+});
+
+// ---------- QUEUE ----------
+function renderQueue(){
+  const list = document.getElementById('queueList');
+  const countLabel = document.getElementById('queueCountLabel');
+  countLabel.textContent = queue.length + ' nhiệm vụ';
+  list.innerHTML = '';
+  if(queue.length === 0){
+    list.innerHTML = '<div class="queue-empty">Chưa có nhiệm vụ nào. Chọn marker trên sơ đồ để thêm.</div>';
+  } else {
+    queue.forEach((t, i)=>{
+      const div = document.createElement('div');
+      div.className = 'queue-item';
+      div.innerHTML = `#${i+1} &nbsp; Nâng <b>${t.pick}</b> <span class="arrow">&rarr;</span> Hạ <span class="to">${t.drop}</span>`;
+      const rm = document.createElement('button');
+      rm.className = 'rm';
+      rm.textContent = '✕';
+      rm.addEventListener('click', ()=>{ queue.splice(i,1); renderQueue(); });
+      div.appendChild(rm);
+      list.appendChild(div);
+    });
+  }
+  updateSendBtnState();
+}
+
+function buildTaskString(){
+  return queue.map(t => `${t.pick},${t.drop}`).join('; ');
+}
+
+document.getElementById('demoBtn').addEventListener('click', ()=>{
+  queue = queue.concat([{pick:3,drop:11},{pick:4,drop:3},{pick:8,drop:2}]);
+  log('task', 'Đã nạp chuỗi ví dụ mẫu vào hàng đợi.');
+  renderQueue();
+});
+
+// ---------- MQTT ----------
+const connDot = document.getElementById('connDot');
+const connLabel = document.getElementById('connLabel');
+const connectBtn = document.getElementById('connectBtn');
+const disconnectBtn = document.getElementById('disconnectBtn');
+
+function setConnState(state, label){
+  connDot.className = 'dot ' + state;
+  connLabel.textContent = label;
+}
+
+function updateSendBtnState(){
+  document.getElementById('sendBtn').disabled = !(connected && queue.length > 0);
+}
+
+function doConnect(){
+  const url = document.getElementById('brokerUrl').value.trim();
+  const username = document.getElementById('mqttUser').value;
+  const password = document.getElementById('mqttPass').value;
+  const clientId = document.getElementById('mqttClientId').value.trim() || ('agv-gui-' + Date.now());
+
+  if(!url){
+    log('err', 'Vui lòng nhập Broker URL (dạng wss://...:8884/mqtt).');
+    return;
+  }
+
+  setConnState('connecting', 'Đang kết nối...');
+  log('mqtt', `Đang kết nối tới ${url} ...`);
+
+  try{
+    client = mqtt.connect(url, {
+      username: username || undefined,
+      password: password || undefined,
+      clientId,
+      reconnectPeriod: 4000,
+      connectTimeout: 8000,
+    });
+  } catch(e){
+    setConnState('error', 'Lỗi cấu hình kết nối');
+    log('err', 'Không thể tạo kết nối: ' + e.message);
+    return;
+  }
+
+  client.on('connect', ()=>{
+    connected = true;
+    setConnState('online', 'Đã kết nối MQTT');
+    log('ok', 'Kết nối MQTT thành công.');
+    connectBtn.style.display = 'none';
+    disconnectBtn.style.display = 'block';
+    updateSendBtnState();
+
+    if(document.getElementById('rememberChk').checked){
+      localStorage.setItem(CONN_KEY, JSON.stringify({
+        url, username, password,
+        topic: document.getElementById('mqttTopic').value.trim() || 'agv/tasks/request',
+        clientId
+      }));
+      log('mqtt', 'Đã lưu thông tin kết nối cho lần mở sau.');
+    }
+  });
+
+  client.on('reconnect', ()=>{
+    setConnState('connecting', 'Đang kết nối lại...');
+    log('mqtt', 'Đang thử kết nối lại...');
+  });
+
+  client.on('error', (err)=>{
+    setConnState('error', 'Lỗi kết nối');
+    log('err', 'Lỗi MQTT: ' + (err && err.message ? err.message : err));
+  });
+
+  client.on('close', ()=>{
+    connected = false;
+    setConnState('', 'Chưa kết nối MQTT');
+    updateSendBtnState();
+  });
+}
+
+connectBtn.addEventListener('click', doConnect);
+
+disconnectBtn.addEventListener('click', ()=>{
+  if(client){ client.end(true); }
+  connected = false;
+  setConnState('', 'Chưa kết nối MQTT');
+  connectBtn.style.display = 'block';
+  disconnectBtn.style.display = 'none';
+  log('mqtt', 'Đã ngắt kết nối MQTT.');
+  updateSendBtnState();
+});
+
+document.getElementById('forgetBtn').addEventListener('click', ()=>{
+  localStorage.removeItem(CONN_KEY);
+  log('mqtt', 'Đã xoá thông tin kết nối đã lưu trên trình duyệt này.');
+});
+
+document.getElementById('sendBtn').addEventListener('click', ()=>{
+  if(!connected || queue.length === 0) return;
+  const topic = document.getElementById('mqttTopic').value.trim() || 'agv/tasks/request';
+  const dataStr = buildTaskString();
+  const payload = JSON.stringify({ data: dataStr });
+
+  client.publish(topic, payload, {qos:1}, (err)=>{
+    if(err){
+      log('err', 'Gửi thất bại: ' + err.message);
+    } else {
+      log('ok', `Đã gửi lên topic <b>${topic}</b>`);
+      log('mqtt', `Payload: ${payload}`);
+      queue = [];
+      renderQueue();
+    }
+  });
+});
+
+// ---------- GRID CONFIG (manager) ----------
+document.getElementById('applyGridBtn').addEventListener('click', ()=>{
+  const r = parseInt(document.getElementById('gridRowsInput').value, 10);
+  const c = parseInt(document.getElementById('gridColsInput').value, 10);
+  if(r >= 1 && r <= 12 && c >= 1 && c <= 12){
+    gridRows = r; gridCols = c;
+    pickMarker = null; dropMarker = null;
+    renderFloor();
+    updateSelectionHint();
+    saveGridConfig();
+    log('mqtt', `Đã cập nhật sơ đồ: ${r} hàng × ${c} cột = ${r*c} marker.`);
+  } else {
+    log('err', 'Số hàng/cột phải trong khoảng 1-12.');
+  }
+});
+
+// ---------- INIT ----------
+loadGridConfig();
+renderFloor();
+updateSelectionHint();
+renderQueue();
+
+// Nạp lại thông tin kết nối đã lưu (nếu có) và tự động kết nối
+document.getElementById('mqttClientId').value = 'agv-gui-' + Math.random().toString(16).slice(2,8);
+try{
+  const rawConn = localStorage.getItem(CONN_KEY);
+  if(rawConn){
+    const cfg = JSON.parse(rawConn);
+    document.getElementById('brokerUrl').value = cfg.url || '';
+    document.getElementById('mqttUser').value = cfg.username || '';
+    document.getElementById('mqttPass').value = cfg.password || '';
+    document.getElementById('mqttTopic').value = cfg.topic || 'agv/tasks/request';
+    document.getElementById('mqttClientId').value = cfg.clientId || document.getElementById('mqttClientId').value;
+    log('mqtt', 'Tìm thấy thông tin kết nối đã lưu, đang tự động kết nối...');
+    doConnect();
+  } else {
+    log('mqtt', 'Sẵn sàng. Vào tab "Quản lý" để nhập thông tin broker HiveMQ và bấm "Kết nối".');
+  }
+}catch(e){
+  log('mqtt', 'Sẵn sàng. Vào tab "Quản lý" để nhập thông tin broker HiveMQ và bấm "Kết nối".');
+}
+</script>
+</body>
+</html>

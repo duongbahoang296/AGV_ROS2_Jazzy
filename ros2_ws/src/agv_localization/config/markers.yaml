@@ -1,0 +1,58 @@
+# ============================================================
+# Ban do marker LUOI 5 cot x 4 hang (20 marker) - khop thuc dia
+# ============================================================
+# Cach danh so (theo COT truoc, id chay doc tung cot):
+#   row = id % 4      (vi tri trong cot, 0..3)
+#   col = id // 4     (cot thu may, 0..4)
+#   x = row * 0.4     (trong cung cot, id tang theo +x = huong dau xe luc home)
+#   y = -col * 0.4    (cot tang sang PHAI xe = -y)
+#
+# So do (nhin tu tren xuong, +x huong len, +y huong trai):
+#
+#   y=0.0   -0.4   -0.8   -1.2   -1.6      (col 0    1     2     3     4)
+#   --------------------------------------------------------------
+#    3       7      11     15     19        x=1.2  (row 3)
+#    2       6      10     14     18        x=0.8  (row 2)
+#    1       5       9     13     17        x=0.4  (row 1)
+#    0       4       8     12     16        x=0.0  (row 0)
+#    ^home, dau xe nhin +x (len tren). Marker 4 o ben PHAI xe (-y).
+#
+# Tat ca marker dan CUNG HUONG: canh tren chi ve +x map -> yaw marker = 0.
+#
+# Quy uoc huong xe (da do thuc te o test A/B/C):
+#   nhin +x  -> yaw   0
+#   nhin +y  -> yaw -90  (ben trai xe)
+#   nhin -x  -> yaw 180
+#   nhin -y  -> yaw +90  (ben phai xe)
+
+frame_id: map
+start_marker: 0
+home_marker: 0
+initial_yaw: 0.0
+
+# Kich thuoc luoi (cho planner)
+grid_rows: 4         # so marker trong 1 cot (theo +x)
+grid_cols: 5         # so cot (theo -y)
+grid_spacing: 0.4
+
+markers:
+  0:  {x: 0.0, y:  0.0, yaw: 0.0}
+  1:  {x: 0.4, y:  0.0, yaw: 0.0}
+  2:  {x: 0.8, y:  0.0, yaw: 0.0}
+  3:  {x: 1.2, y:  0.0, yaw: 0.0}
+  4:  {x: 0.0, y: -0.4, yaw: 0.0}
+  5:  {x: 0.4, y: -0.4, yaw: 0.0}
+  6:  {x: 0.8, y: -0.4, yaw: 0.0}
+  7:  {x: 1.2, y: -0.4, yaw: 0.0}
+  8:  {x: 0.0, y: -0.8, yaw: 0.0}
+  9:  {x: 0.4, y: -0.8, yaw: 0.0}
+  10: {x: 0.8, y: -0.8, yaw: 0.0}
+  11: {x: 1.2, y: -0.8, yaw: 0.0}
+  12: {x: 0.0, y: -1.2, yaw: 0.0}
+  13: {x: 0.4, y: -1.2, yaw: 0.0}
+  14: {x: 0.8, y: -1.2, yaw: 0.0}
+  15: {x: 1.2, y: -1.2, yaw: 0.0}
+  16: {x: 0.0, y: -1.6, yaw: 0.0}
+  17: {x: 0.4, y: -1.6, yaw: 0.0}
+  18: {x: 0.8, y: -1.6, yaw: 0.0}
+  19: {x: 1.2, y: -1.6, yaw: 0.0}
