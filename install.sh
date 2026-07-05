@@ -44,3 +44,10 @@ paho-mqtt
 echo "========================================"
 echo "Installation completed."
 echo "========================================"
+echo "Installing ROS dependencies..."
+
+rosdep install \
+--from-paths ros2_ws/src \
+--ignore-src \
+-r \
+-y
