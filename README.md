@@ -1,5 +1,25 @@
 # AGV ROS2 Jazzy Project
 
+## Features
+
+- ROS2 Jazzy
+- micro-ROS
+- ESP32
+- ArUco Localization
+- MQTT
+- HiveMQ
+- HTML GUI
+
+---
+## Hardware
+
+- ESP32
+- Camera
+- Motor Driver
+- Encoder
+- IMU
+
+---
 ## Requirements
 
 - Ubuntu 24.04
